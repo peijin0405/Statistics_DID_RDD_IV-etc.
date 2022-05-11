@@ -1,0 +1,146 @@
+---
+title: "stats2_problemset1"
+author: "Peijin Li"
+date: "2022/2/21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+ls()
+rm(list=ls())
+```
+
+```{r}
+# change working directory
+#setwd("C:/Users/little page/Desktop/VI_problemset1")
+#getwd()
+```
+
+```{r}
+## get libraries
+library(fBasics)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(datasets)
+library(haven)
+library(xtable)
+library(knitr)
+library(car)
+library(ggplot2)
+library(ivreg)
+library(statar)
+library(tidyverse )
+```
+
+1.Load the data into R and confirm that you have 100,000 observations and that the variables are lnearn (log earnings), female (indicator for female), S (years of schooling), xpr (years of experience), xpr2 (years of experience squared), and compulsoryS (years of compulsory schooling in the individual’s state). 
+```{r}
+## get data
+######################################################################
+##Load the data into R 
+reviewdata0 <- read_dta("iv_problem_set.dta")
+head(reviewdata0)
+```
+
+```{r}
+##confirm that you have 100,000 observations 
+reviewdata0_dim=dim(reviewdata0)
+reviewdata0_dim
+```
+2.Regress log earnings on female, year of schooling, years of experience and years of experience squared. What is the impact on earnings of a 1 year increase in schooling? Can you reject the hypothesis that the return to schooling is 0? 
+```{r}
+olsmodel = lm(reviewdata0$lnearn ~ reviewdata0$S + reviewdata0$female + reviewdata0$xpr + reviewdata0$xpr2)
+olstable1 = data.frame(xtable(olsmodel))
+kable(olstable1, caption="OLS Results")
+summary(olsmodel)
+```
+The estimated effect of a one year increase in schooling is associated with 15 percent increase in earnings. With a t-value of 100.89 and P-value of <2e-16, we can reject the hypothesis that the return to schooling is 0.
+
+3.Explain why nstrumental variables strategy?this estimate may be biased due to endogeneity.
+Because there are obviously other factors exert impact on the dependent variable--earnings. These factors are hidden in the error term, being correlated to both the dependent variable--earnings and independent variable. So this estimate may be biased due to endogeneity.
+
+4.Now suppose that we think state compulsory schooling is an instrument for years of schooling. Explain the intuition behind the statistical conditions that have to be satisfied for this variable to be a valid instrument for years of schooling. 
+We think state compulsory schooling is an instrument for years of schooling because 1.it explains the independent variable of interest(years of schooling);2.it does not directly explain the dependent variable (earnings). 
+
+5.Present a graphical analysis to plot the first stage and reduced form results. How does this graphical analysis motivate the instrumental variables strategy?
+```{r}
+#scatter plot of the schooling(y-axis) against compulsoryS (years of compulsory schooling in the individual’s state) (x-axis)
+s_compulsoryS_reg = lm(unlist(reviewdata0[,1]) ~ unlist(reviewdata0[,2]))
+predict_s_compulsoryS <- data.frame(s_compulsoryS_pred = predict(s_compulsoryS_reg, reviewdata0),reviewdata0[,2])
+
+p1 = ggplot(reviewdata0, aes(x=unlist(reviewdata0[,2]), y=unlist(reviewdata0[,1]))) + geom_point() + labs(x = "compulsoryS", y = "S",title = "First Stage") + geom_line(color='red',data = predict_s_compulsoryS, aes(x=unlist(reviewdata0[,2]), y=s_compulsoryS_pred))
+p1
+```
+
+```{r}
+##scatter plot of the lnearn (y-axis) against compulsoryS (years of compulsory schooling in the individual’s state) (x-axis).
+lnearn_compulsoryS_reg = lm(unlist(reviewdata0[,6]) ~ unlist(reviewdata0[,2]))
+predict_s_compulsoryS <- data.frame(s_compulsoryS_pred = predict(lnearn_compulsoryS_reg , reviewdata0), reviewdata0[,2])
+
+p2 = ggplot(reviewdata0, aes(x=unlist(reviewdata0[,2]), y=unlist(reviewdata0[,6]))) + geom_point() + labs(x = "compulsoryS", y = "lnearnings",title = "Reduced Form") + geom_line(color='red',data = predict_s_compulsoryS, aes(x=unlist(reviewdata0[,2]), y=s_compulsoryS_pred))
+p2
+```
+
+Since these graphs are not very intuitive, I choose another way to visualize the relationship  
+
+```{r}
+##calculate the mean of S and lnearn variables
+avg = reviewdata0 %>% group_by(compulsoryS) %>% summarize (S_avg = mean(S),S_lnearn= mean(lnearn))
+avg
+```
+
+```{r}
+s_compulsoryS_reg0 = lm(unlist(avg[,2]) ~ unlist(avg[,1]))
+predict_s_compulsoryS0 <- data.frame(s_compulsoryS_pred0 = predict(s_compulsoryS_reg0, avg),avg[,1])
+p1_1 = ggplot(avg, aes(x=unlist(avg[,1]), y=unlist(avg[,2]))) + geom_point() + labs(x = "compulsoryS", y = "S",title = "First Stage") + geom_line(color='red',data = predict_s_compulsoryS0, aes(x=unlist(avg[,1]), y=s_compulsoryS_pred0))
+p1_1
+```
+
+```{r}
+##scatter plot of the lnearn (y-axis) against compulsoryS (years of compulsory schooling in the individual’s state) (x-axis).
+lnearn_compulsoryS_reg0 = lm(unlist(avg[,3]) ~ unlist(avg[,1]))
+predict_s_compulsoryS0 <- data.frame(s_compulsoryS_pred0 = predict(lnearn_compulsoryS_reg0 , avg), avg[,1])
+p2_1 = ggplot(avg, aes(x=unlist(avg[,1]), y=unlist(avg[,3]))) + geom_point() + labs(x = "compulsoryS", y = "lnearnings",title = "Reduced Form") + geom_line(color='red',data = predict_s_compulsoryS0, aes(x=unlist(avg[,1]), y=s_compulsoryS_pred0))
+p2_1
+```
+According to these graphs, we could see that there is a correlation between compulsoryS & earning and earning & compulsoryS. The correlation between compulsoryS & earning proves that there is a correlation between X and Z(instrumental variable). The correlation between earning & compulsoryS proves that Z could influence Y through X. These evidence proves that the instrumental variables strategy works.
+
+6.Estimate the first stage regression. Is compulsory schooling a statistically significant predictor of schooling? 
+```{r}
+fsmodel = lm(reviewdata0$S ~ reviewdata0$compulsoryS + reviewdata0$female + reviewdata0$xpr + reviewdata0$xpr2)
+olstable_1 = data.frame(xtable(fsmodel))
+olstable_1
+```
+With a T-value of 26.3432717 and P value of 2.039012e-152, we know that compulsory schooling is a statistically significant predictor of schooling.
+
+7.Use ivregress to implement the IV estimator in which we instrument for schooling using compulsory schooling. What are your results? How does the IV estimate for the return to schooling compare to the OLS estimate? 
+```{r}
+##  IV estimation
+ivmodel0<-ivreg(lnearn ~ female + xpr + xpr2 | S | compulsoryS, data = reviewdata0)
+summary(ivmodel0)##show the results
+```
+Compared with OLS, we could find that the OLS regression and the IV regression are consistent. The residual standard error and the R square of both regressions are the same. With compulsoryS being the instrumental variable for schooling, we could see that in the IV regression, it is still statistically significant(t-value= 8.976 , and p value is <2e-16). And the Wu-Hausman results show that the IV method is successful. 
+
+8.Suppose that we think the return to schooling varies by gender and we want to instrument for the female*S interaction term using compulsory schooling interacted with gender. Estimate the first stage regressions (note that we have 2 variables that need to be instrumented). Do we have a valid instrument for each variable that needs to be instrumented? 
+```{r}
+##create the female*S interaction term and female*compulsory interaction term
+reviewdata0$female_S = reviewdata0$female*reviewdata0$S
+reviewdata0$female_compulsory=reviewdata0$female*reviewdata0$compulsoryS
+
+##Estimate the first stage regressions
+fsmodel2 = lm(reviewdata0$S ~ reviewdata0$compulsoryS + reviewdata0$female_compulsory+ reviewdata0$female + reviewdata0$xpr + reviewdata0$xpr2)
+fsmodel3 = lm(reviewdata0$female_S ~ reviewdata0$compulsoryS + reviewdata0$female_compulsory + reviewdata0$female + reviewdata0$xpr + reviewdata0$xpr2)
+olstable_2 = data.frame(xtable(fsmodel2))
+olstable_3=data.frame(xtable(fsmodel3))
+olstable_2
+olstable_3
+```
+In the first regression of Schooling, we could see that the t-value of the compulsoryS is 26.0984616 and p-value of compulsoryS is 1.208375e-149. We could assume that compulsoryS is a valid instrumental variable (With the inclusion condition) for schooling. In the first regression of female_S, we could see that the t-value of the female_compulsory is 26.3375407 and p-value of compulsoryS is 2.369363e-152. We could also assume that female_S is a valid instrumental variable (With the inclusion condition) for female_S.
+
+9.Estimate the IV results related to the first stage regressions in (8). Can we reject the hypothesis that the IV estimate of the coefficient on female*S is 0? What are the conclusions about whether the return to schooling varies based on gender or not? 
+```{r}
+ivmodel1<-ivreg(lnearn ~ female + xpr + xpr2 | S + female_S | compulsoryS + female_compulsory, data = reviewdata0)
+summary(ivmodel1)
+```
+With a t value of Schooling to 5.387 and p value of Schooling to be 7.18e-08, we could assume that the association between Schooling and Earning is statistically significant. The t value of female_S in the regression is 1.299, and the p value of the variable is  0.194. So we could not reject the hypothesis that the IV estimate of the coefficient on female*S is 0. We could not say that the returning to schooling varies based on gender. 

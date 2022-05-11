@@ -1,0 +1,162 @@
+---
+title: "problemset2"
+author: "Peijin Li"
+date: "2022/3/28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+## change working directory
+#setwd("C:/Users/little page/Desktop/DD_problemset/")
+#getwd()
+
+## get libraries
+library(fBasics)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(datasets)
+library(haven)
+library(xtable)
+library(knitr)
+library(car)
+library(ggplot2)
+library(ivreg)
+library(statar)
+library(broom)
+library(data.table) ## For some minor data wrangling
+library(fixest)     ## NB: Requires version >=0.9.0
+library(tidyverse)
+library(plm)
+library(miceadds)
+library(lmtest)
+library(multiwayvcov)
+
+## get data
+reviewd=read_dta("problem_set_2.dta")
+head(reviewd)
+reviewd_dim=dim(reviewd)
+```
+1. Confirm that you have varying dates of treatment. Explain the intuition of applying the Diff-in-Diff research design in this context to estimate impacts of the program on math test scores.
+```{r}
+##Confirm that you have varying dates of treatment. 
+#check unique dates of treatment
+unique(reviewd$yr1_treatment)
+##As we can see, we have diff dates of treatment 
+```
+
+Within a school-grade, some teachers received additional aids and other did not. Since the subjects are selected randomly, we could assume that students grade change parallelly before the a group of teachers are treated. In the absence of treatment, the differences between the treatment and control group would have continued after date t*. Therefore, any changes in the differences between the treatment and control group must be due to A4A(the treatment effects).
+
+2. Plot average math test scores and the number of aides over calendar year for the treatment and control groups. What does this plot illustrate? For example, are the treatment and control groups similar? Explain why it’s ok if there are differences between the treatment and control groups or why it’s not ok. What sorts of differences between the treatment and control groups would be problematic for the Diff-in-Diff research design, and how do those factors relate to this plot? 
+```{r}
+##extract the data needed
+plot_math_score=aggregate(reviewd$mathscore,list(reviewd$year,reviewd$treatment ), FUN=mean)
+plot(plot_math_score$Group.1[plot_math_score$Group.2==0],plot_math_score$x[plot_math_score$Group.2==0],type="l",col="red",xlab="Year",ylab="Average math scores",main="Math scores",xlim=c(2000,2019), ylim=c(1100,1200), lwd=3, xaxt='n') 
+axis(2, at = seq(1090,1190,10))
+axis(1, at = seq(2000,2019,1))
+lines(plot_math_score$Group.1[plot_math_score$Group.2==1],plot_math_score$x[plot_math_score$Group.2==1],type="b",col="blue", lwd=3)
+legend(2001, 1190, legend=c("no aides", "received aides"),col=c("red", "blue"), lty=1:2, cex=0.8)
+```
+
+```{r}
+plotd_aides=aggregate(reviewd$numaides, list(reviewd$year,reviewd$treatment), FUN=mean)
+plot(plotd_aides$Group.1[plotd_aides$Group.2==0],plotd_aides$x[plotd_aides$Group.2==0],type="l",col="red",xlab="Year",ylab="Number of aides",main="Number of aides", ylim=c(0,5), lwd=3,xlim=c(2000,2019), xaxt='n') 
+axis(1, at = seq(2000,2019,1))
+lines(plotd_aides$Group.1[plotd_aides$Group.2==1],plotd_aides$x[plotd_aides$Group.2==1],type="b",col="blue", lwd=3)
+legend(2001, 5, legend=c("no aides", "received aides"),col=c("red", "blue"), lty=1:2, cex=0.8)
+```
+
+The number of aides chart shows that from 2001-2004, there is no difference between the treatment and control groups. As the treatment has started from 2004, we see that the number of aides in the treatment group gradually increased till 2013,and was then stable. The number of aides among the control group is constantly at 2 over time.
+
+From Q1, we could learn that the earliest treatment is conducted in 2004, which means there is no treatment difference between the treatment group and the control group. We could see from the graph that the treatment group and the control group follow relatively the same development pattern(these two trends are parallel, this is an important condition for DD analysis). After 2004, we could see that the treatment group increase quicker than the control group. This difference is the second "Difference" we wanna learn. The different developing trends before the treatment between the treatment group and the control group would be problematic for the Diff-in-Diff research design. From this plot, we could eyeball the plot that the trends are relatively the same before 2004 and there are some growth rates difference after that.
+
+3.Using observations for treated teachers only, create time since treatment and plot average math test score by time since treatment. Explain how this plot would relate to an event study research design and what advantages the Diff-in-Diff research design offers beyond the event study research design. 
+```{r}
+##form a new list of time_since_treatment
+reviewd$treatment_new= reviewd$treatment
+reviewd$time_since_treatment = case_when(reviewd$treatment_new == 1 ~ reviewd$year - reviewd$yr1_treatment,reviewd$treatment_new == 0 ~ 0)
+table(reviewd$time_since_treatment)
+## plot
+plotd3=aggregate(reviewd$mathscore[reviewd$treatment_new==1], list(reviewd$time_since_treatment[reviewd$treatment_new==1]), FUN=mean)
+plot(x = plotd3$Group.1,
+     y = plotd3$x,
+     type="o",##linear
+     main="mathscore of treated teachers",
+     xlab="time_since_treatment",
+     ylab="mathscore",
+     asp=0.1)
+abline(v=0, col="black", lwd=2)
+```
+
+An even study intuition here is that we could compare students' math scores before and after the treatment date. The advantage of DID offer is that it appends another dimension when evaluating the effect of the treatment(A4A). By inviting the controlling group(the part of teachers who do not receive the treatment), we take into account the difference between teachers who receives the treatment and the teachers who do not.
+
+4.You have been asked to use the full data (treatment and control teachers), define time since treatment and estimate the following regression specification
+```{r}
+ddreg4 = feols(mathscore ~ treatment + i(time_since_treatment, ref = 0)| schoolid^grade + factor(year),data = reviewd)
+summary(ddreg4)
+iplot(ddreg4, xlab = 'Time Since A4A Introduced', main = 'DD Coefficients')
+```
+
+It is ok but not necessary to include school-grade fixed effects. Because fixed effects control the group-level effect, in the estimation of school-grade fixed effects, we are modeling a separate effect for each possible combination of school and grade. For the school and grade fixed effects, we are building a model in which the school-level effects do not change over grade, and the grade-level effects apply exactly the same in every school. Since what we want to analyze is the effect of the treatment of A4A on the school level and the grade level. there would be no need to conduct a school-grade fixed effect in which we create a separate effect for each possible combination of school and grade. 
+
+Cluster the standard error is for the purpose of dealing with the heteroscedasticity issue on a certain level. Since the teacher level is so specific that it actually boils down to the individual level, it would be unnecessary to do so.
+
+5.Instead of the above regression specification, use the full data (treatment and control teachers), define time since treatment and estimate the following regression specification
+```{r}
+ddreg5 = feols(mathscore ~ i(time_since_treatment, ref = 0) + treatment + factor(grade) + factor(year) + factor(schoolid), vcov = ~schoolid,data = reviewd)
+summary(ddreg5)
+iplot(ddreg5, xlab = 'Time Since A4A Introduced', main = 'DD Coefficients')
+```
+
+According to the graph, we could see that before the treatment(time_since_treatment<=0), we could not reject the null hypothesis that the effect of the treatment is zero. after the treartment(time_since_treatment>0), for the time_since_treatment=1,2,5,6, we could reject the null hypothesis that the effect of the treatment is zero; in other words, the A4A indeed increase students' mathscore.
+
+6.Re-estimate the above regression specification using school-grade linear calendar time trends. Plot the same coefficients. Are the results robust to controlling for these trends? Why or why not?
+```{r}
+ddreg6 = feols(mathscore ~ i(time_since_treatment, ref = 0) + treatment | factor(schoolid) +factor(grade) + factor(year) + schoolid^grade^year,vcov=~schoolid, data = reviewd)
+summary(ddreg6)
+iplot(ddreg6, xlab = 'Time Since A4A Introduced', main = 'DD Coefficients')
+```
+
+These trends are robust when controlled for the school-grade-calendar year fixed effects, because by comparing the results of 5 and 6, we could see that we can get the similar conclusion. 
+
+7.The A4A program was designed to provide additional teacher aides to teachers, Estimate the above regression specification in (5) using numaides as the outcome variable. Plot the coefficients over time since treatment. How many additional aides did treated teachers receive after the program took effect?
+```{r}
+##numaides = number of teacher aides assigned to the teacher
+ddreg5 = feols(numaides ~ i(time_since_treatment, ref = 0) + treatment + factor(grade) + factor(year) + factor(schoolid), vcov = ~schoolid,data = reviewd)
+summary(ddreg5)
+iplot(ddreg5, xlab = 'Time Since State A4A Introduced', main = 'DD Coefficients')
+```
+
+According to the graph, we could see on average, two additional aides for treated teacher takes effect. 
+
+
+8.Ultimately we want to know how much an additional teacher aid increased average math test scores. To do this, your boss suggests estimating the following regression: 
+
+There are endogeneity concerns because there are other factors that could exert influence on students' math scores and also influence the variable of "numaides". For example, the teaching ability of the teacher. Some teachers may fail to improve their teaching ability even after receiving the aid. 
+
+9.To address the endogeneity concerns in (8), you propose using the following instrumental variable (IV) strategy. You explain that you will define TAfter = T*After where T is an indicator for being a treatment teacher and After is an indicator for time since treatment being positive, and then you will estimate the regression in (8) while instrumenting for the number of aides with TAfter. What are the IV inclusion and exclusion conditions in this setting? Implement this IV strategy. Provide evidence on the inclusion condition (first stage). How much does an additional aide increase average math test scores based on your results?
+```{r}
+# First stage of the regression
+reviewd$After = case_when(reviewd$time_since_treatment > 0 ~ 1,reviewd$time_since_treatment <= 0 ~ 0) 
+reviewd$TAfter = reviewd$treatment*reviewd$After
+first_stage = lm(numaides ~ TAfter+ treatment+factor(schoolid)+ factor(grade)+factor(year), data = reviewd)
+summary(first_stage)
+```
+
+The IV inclusion and exclusion conditions in this setting:
+Inclusion condition: The instrument ("TAfter") must be a statistically significant determinant of "numaides"(the number of aides). Accoring to the results, it is statistically significant, with T-test to be 781.105 and p-value of <2e-16. Exclusion condition: The instrument ("TAfter") must be uncorrelated with the error term in the main equation which means "TAfter" must not directly influence "mathscore". 
+
+IV strategy:
+Since we have a variable "TAfter" that is (1) correlated with "numaides" and (2) not correlated with "mathscore" so that "TAfter" does not directly affect "mathscore". We can estimate the coefficient based on the part of "numaides" that is correlated with "TAfter" and not correlated with the other Xs and the part of "mathscore" that is correlated with "TAfter" and not the other Xs.
+
+Based on my results, an additional aide increase 5.7054 math test scores on average.
+```{r}
+# Regression with instrument variable
+ddivreg = ivreg(mathscore ~ treatment+factor(schoolid)+ factor(grade)+factor(year)|numaides| TAfter, data = reviewd)
+summary(ddivreg)
+```
+

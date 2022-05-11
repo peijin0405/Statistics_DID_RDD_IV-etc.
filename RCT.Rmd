@@ -1,0 +1,166 @@
+---
+title: "Problem_set_4"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r}
+#setwd("C:/Users/little page/Desktop/problemset_4")
+#getwd()
+```
+```{r}
+## get libraries
+library(fBasics)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(datasets)
+library(haven)
+library(xtable)
+library(knitr)
+library(car)
+library(ggplot2)
+library(ivreg)
+library(statar)
+library(broom)
+library(data.table) ## For some minor data wrangling
+library(fixest)     ## NB: Requires version >=0.9.0
+library(tidyverse)
+library(plm)
+library(miceadds)
+library(lmtest)
+library(multiwayvcov)
+library(stargazer)
+
+```
+
+```{r}
+rm(list=ls())
+```
+
+
+```{r}
+## get data
+Rdata=read_dta("problem_set_4.dta")
+head(Rdata)
+dim(Rdata)
+```
+
+1.Start by regressing the outcome of interest, attend, on the treatment indicator. What are your preliminary results? How does accounting for the clustered randomization design affect your preliminary results? 
+
+```{r}
+##regression 
+notclustered = lm(attend ~ treatment, data = Rdata)
+clustered = lm.cluster(attend ~treatment, data = Rdata, cluster="treatcluster")
+summary(notclustered)
+summary(clustered)
+```
+
+The preliminary results yield a coefficient of 0.0002765(and with and t_value of 0.545 and p-value of 0.586, it is not statistically significant). This means students with treatment have 0.0002765 more probability to attending school. Accounting for the clustered randomization design does not affect the preliminary results much(with the coefficient of 0.0002764782), however, the standard error increases in clustered regression because we have fewer clusters than observations. This means the correlation in errors within school-grade and different errors across school-grade does affect the result. There is heteroscedasticity in this case, and we should apply the clustered regression.
+
+2.Check for balance between the treatment and control observations based on age, gender, math scores and reading scores. Are these observables balanced across the treatment and control groups? 
+```{r}
+femalecheck = lm.cluster(female ~treatment, data = Rdata, cluster="treatcluster")
+summary(femalecheck)
+```
+With a T-value of  -6.034733 and p-value of 1.592258e-09(statistically significant), gender differs across those assigned to the treatment and control groups. However, the coefficient of it is very small(-0.00214326), this means the magnitude of the effect of the imbalance is limited. 
+
+```{r}
+agecheck = lm.cluster(age ~treatment, data = Rdata, cluster="treatcluster")
+summary(agecheck)
+```
+With a T-value of 1.525195 and p-value of 0.1272106(not statistically significant), age does not differ across those assigned to the treatment and control groups.
+
+```{r}
+mathcheck = lm.cluster(math ~treatment, data = Rdata, cluster="treatcluster")
+summary(mathcheck)
+```
+With a T-value of 1.240805  and p-value of 0.214678(not statistically significant), math does not differ across those assigned to the treatment and control groups.
+
+```{r}
+readcheck = lm.cluster(read ~treatment, data = Rdata, cluster="treatcluster")
+summary(readcheck)
+```
+
+With a T-value of 1.650931 and p-value of 0.09875276(not statistically significant), read does not differ across those assigned to the treatment and control groups.
+
+```{r}
+multicheck = lm.cluster(treatment ~female + age + math + read, data = Rdata, cluster="treatcluster")
+summary(multicheck)
+```
+From this regression, the coefficients are jointly equal to 0. The above evidences prove that these observables are balanced across the treatment and control groups. The imbalance of gender does not influence much due to its small coefficient. 
+
+3.Check if there are observations that are missing outcome data. If there are any, does this attrition appear random or not?
+```{r}
+##create a column of attrition 
+Rdata$attrition =ifelse(is.na(Rdata$attend), 1, 0)
+
+attritioncheck = lm(attrition ~ treatment, data = Rdata)
+summary(attritioncheck)
+```
+
+```{r}
+##create a column of attrition with other variables
+attritioncheck_1 = lm(attrition ~ treatment + age + female + math + read, data = Rdata)
+summary(attritioncheck_1)
+```
+
+There are observations that are missing outcome data. The result of the regressions mean that the correlation between attrition and treatment is not statistically significant(with a t-value of -1.492  and p-value to be  0.136). And attrition is also balanced in gender, age, math and read. So this attrition appear to be random. 
+
+4.Implement a permutation test to assess the credibility of your estimated treatment effect. Include a plot of the distribution of estimates from your permutation samples and mark your estimate based on the actual data in this distribution. What fraction of estimates from your permutation test have higher estimated treatment effects that the estimate based on the actual data? 
+```{r}
+reps = 50
+CoefMatrix  = matrix(NA, reps, 1)   # Matrix to store our results.  
+for(ii in 1:reps) {
+  Rdata$p_treatment = sample(0:1, dim(Rdata)[1], replace = TRUE)
+  
+  ptest_reg = lm(attend ~ p_treatment, data = Rdata)
+  CoefMatrix[ii,1]=coefficients(ptest_reg)[2]
+}
+
+##draw the graph
+hist(CoefMatrix[,1],breaks=20,xlim=c(-0.06,0.06),main="Permutation Test",xlab="Permutation Estimate")
+abline(v=0.05427341, col="red")##mark the original value of the coefficient
+```
+
+There is no estimates from my permutation test have higher estimated treatment effects that the estimate based on the actual data.  This means the effect of treatment is not a random result. 
+
+
+5.Now suppose that you learn that, in addition to being clustered at the school and grade level, you learn that the randomization varied treatment intensity within treatment clusters. The treatcluster variable captures which school-grades were assigned to treatment and which were assigned to control. Within the treated clusters, the clusters were randomly assigned to groups 1, 2, 3, 4 and 5, with the fraction of observations within these clusters assigned to treatment varying from 20%, 40%, 60%, 80% and 100% respectively. 
+
+a.To test for peer effects from the treatment, create two sets of indicator variables: (1) indicator variables for treatment observations within each treated cluster group and (2) indicator variables for observations within each treated cluster group. Regress the attend outcome variable on these indicators. 
+```{r}
+##prepare the variables
+Rdata$a =ifelse(Rdata$treatment == 1 & Rdata$treatcluster_group == 1 , 1, 0)
+Rdata$b =ifelse(Rdata$treatment == 1 & Rdata$treatcluster_group == 2 , 1, 0)
+Rdata$c =ifelse(Rdata$treatment == 1 & Rdata$treatcluster_group == 3 , 1, 0)
+Rdata$d =ifelse(Rdata$treatment == 1 & Rdata$treatcluster_group == 4 , 1, 0)
+Rdata$e =ifelse(Rdata$treatment == 1 & Rdata$treatcluster_group == 5 , 1, 0)
+
+Rdata$treated_cluster_group_one = ifelse(Rdata$treatcluster_group == 1, 1, 0)
+Rdata$treated_cluster_group_two = ifelse(Rdata$treatcluster_group == 2, 1, 0)
+Rdata$treated_cluster_group_three = ifelse(Rdata$treatcluster_group == 3, 1, 0)
+Rdata$treated_cluster_group_four = ifelse(Rdata$treatcluster_group == 4, 1, 0)
+
+```
+
+```{r}
+reg_peer = lm.cluster(attend ~ a+b+c+d+e+treated_cluster_group_one+treated_cluster_group_two+treated_cluster_group_three+treated_cluster_group_four, data = Rdata, cluster="treatcluster_group")
+summary(reg_peer)
+```
+
+b.Plot the coefficients on the direct treatment effects (y-axis) against the fraction treated (x-axis). How do the direct treatment effects vary with the fraction treated? 
+```{r}
+plot(c(0.2,0.4,0.6,0.8,1), c(coefficients(reg_peer)[2],coefficients(reg_peer)[3],coefficients(reg_peer)[4],coefficients(reg_peer)[5],coefficients(reg_peer)[6]), type="b",col="blue",xlab="Treated Fraction",ylab=" Treatment Effects Coefficients",main="Direct Coefficient Plot",ylim=c(0,0.06))
+```
+
+The coefficient of the direct effect captures the direct treatment effect. The treatment effects' coefficient decrease when the treated fraction is between 0.2-0.8, but increases with the treated fraction to be 1. This means that with the increase of treated fraction, the direct effect of treatment decreases(the indirect effect increases). When all the observations are treated, the treatment effect is significant in magnitude. 
+
+c.Plot the coefficients on the indirect treatment effects (y-axis) against the fraction treated (x-axis). How do the indirect treatment effects vary with the fraction treated? Overall, what do you conclude about possible peer effects or spillovers from the treatment? 
+```{r}
+plot(c(0.2,0.4,0.6,0.8,1), c(coefficients(reg_peer)[7],coefficients(reg_peer)[8],coefficients(reg_peer)[9],coefficients(reg_peer)[10],coefficients(reg_peer)[2]+coefficients(reg_peer)[7]-coefficients(reg_peer)[6]), type="b",col="blue",xlab="Treated Fraction",ylab=" Treatment Effects Coefficients",main="Indirect Coefficient Plot",ylim=c(0,0.06))
+```
+
+The coefficients on the indirect treatment effects capture the indirect treatment effect (spillover). With the increase of the treated fraction, the coefficients of treatment effects also increase(the spillover increases). This means that with the increase of treated fraction, there will be more spillover. By checking the p-value of these coefficients, we could justify that the effect of indirect treatment is statistically significant. So there is a possibility that there are peer effects or spillovers from the treatment.

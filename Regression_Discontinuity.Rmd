@@ -1,0 +1,259 @@
+---
+title: "problemset_3_peijin_li"
+author: "Peijin Li"
+date: "2022/4/13"
+output: html_document
+---
+```{r}
+#setwd("D:/GU_peijin/GU_second semester/统计学_II/RDRK/RD_problemset3/problemset_3")
+#getwd()
+
+## get libraries
+library(fBasics)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(datasets)
+library(haven)
+library(xtable)
+library(knitr)
+library(car)
+library(ggplot2)
+library(ivreg)
+library(statar)
+library(broom)
+library(data.table) ## For some minor data wrangling
+library(fixest)     ## NB: Requires version >=0.9.0
+library(tidyverse)
+library(plm)
+library(miceadds)
+library(lmtest)
+library(multiwayvcov)
+library(stargazer)
+
+```
+1.Explain how this benefit schedule creates the opportunity to apply the Regression Discontinuity research design to study the impacts of cash benefits from 2019 on employment in 2020. What are the intuitions behind the identifying assumptions in this context?
+
+RD identifies causal effects based on discontinuous changes in treatment status across subjects above and below a specific cutoff. In this case, the cutoff is the Federal Poverty Limit. The tuition here is  as long as treatment status(get the cash benefits or not) is the only factor that changes discontinuously as the threshold, then the treatment effect on a given outcome can be estimated based on the discontinuous changes in (average) outcomes above and below the threshold(the Federal Poverty Limit).
+
+2.Preliminaries: 
+```{r}
+## get data
+Poverty=read_dta("problem_set_3.dta")
+head(Poverty)
+Poverty_dim=dim(Poverty)
+```
+```{r}
+##A. Create a variable “fpl” that has the federal poverty limit for each household.
+Poverty$fpl[Poverty$nhhld == 1] <- 12490
+Poverty$fpl[Poverty$nhhld == 2] <- 16910
+Poverty$fpl[Poverty$nhhld == 3] <- 21330
+Poverty$fpl[Poverty$nhhld >= 4] <- 25750
+##B. Use this variable to create the running variable “runvar” which captures income relative to the household-specific federal poverty limit.
+Poverty$runvar = Poverty$inc2019 - Poverty$fpl
+##C. Create a binned version of the running variable (runvarbin) that rounds the values of the running variable to the nearest $100. 
+Poverty$runvarbin = round(Poverty$runvar/100)* 100
+##D. Create an indicator D equal to 1 for income above the federal poverty limit (given the household’s size) and 0 otherwise.
+Poverty$D = ifelse(Poverty$runvar > 0, 1, 0)
+##E. Create an indicator T equal to 1 if poverty assistance benefits are positive and 0 otherwise. 
+Poverty$T = ifelse(Poverty$pab2019 > 0, 1, 0)
+
+##Prepare interaction variables
+Poverty$Drunvar=Poverty$D*Poverty$runvar
+
+##F. Unless otherwise stated, use a bandwidth of +/- $5000 around the fpl for the analysis. 
+Poverty_workdata = Poverty[abs(Poverty$runvar) < 5000,]
+
+``` 
+
+3. Sharp RD First Stage regressions and plots: Estimate the following regressions 
+
+```{r}
+##dependent variable as T
+olsmodel = lm.cluster(T ~ runvar + D + Drunvar, cluster='runvarbin', data = Poverty_workdata)
+summary(olsmodel)
+```
+
+```{r}
+##dependent variable as T
+plotdata=aggregate(Poverty_workdata$T, list(Poverty_workdata$runvarbin), FUN=mean)
+plot(plotdata$Group.1,plotdata$x,type="b",col="red",xlab="Dist to Threshold",ylab="Poverty Assistance Benefits",main="First Stage: Sharp RD",ylim=c(0,1)) 
+abline(v=0, col="black")
+grid(nx = NA,ny = NULL,lty = 2, col = "gray", lwd = 2)
+```
+
+```{r}
+##dependent variable as pab2019
+olsmode2 = lm.cluster(pab2019 ~ runvar + D + Drunvar, cluster='runvarbin',data = Poverty_workdata)
+summary(olsmode2)
+```
+
+
+```{r}
+##dependent variable as pab2019
+plotdata=aggregate(Poverty_workdata$pab2019, list(Poverty_workdata$runvarbin), FUN=mean)
+plot(plotdata$Group.1,plotdata$x,type="b",col="red",xlab="Dist to Threshold",ylab="Amount of Poverty Assistance Benefit",main="First Stage: Sharp RD") 
+abline(v=0, col="black")
+grid(nx = NA,ny = NULL,lty = 2, col = "gray", lwd = 2)
+```
+
+By estimating these two regressions, we could see that subjects have different treatment statuses above and below the 2019 federal poverty limit(in the regression of the dependent variable as T, we could see the cutoff(coefficient of variable D is 1). And the average benefit amounts change for households above and below the 2019 federal poverty limit is 4080$, according to the results of the regression with pab2019 to be the dependent variable.
+
+As we can see in the graphs, there is a sharp cutoff at 0, which means we should apply a sharp RD in this case. we could see the graph with pab2019 to be the dependent variable, the Amount of Poverty Assistance Benefit is hanging around 4000. So these graphs are consistent with the regression results.
+
+4. Reduced form regressions and plots:Estimate the following regressions
+```{r}
+olsmode3 = lm.cluster(emp2020 ~ runvar + D + Drunvar, cluster='runvarbin',data = Poverty_workdata)
+summary(olsmode3)
+```
+According to the results of the regression, we could see that the chance to be employed increases by 3.11% for households below the 2019 federal poverty limit(who get the poverty assistance benefits). 
+
+```{r}
+plotdata=aggregate(Poverty_workdata$emp2020, list(Poverty_workdata$runvarbin), FUN=mean)
+plot(plotdata$Group.1,plotdata$x,type="b",col="red",xlab="Dist to Threshold",ylab="Employment in 2020",main="Reduced Form",) 
+abline(v=0, col="black")
+grid(nx = NA,ny = NULL,lty = 2, col = "gray", lwd = 2)
+```
+
+We could see the left part of this graph is slightly higher than the right part of the graph, which means the chance to be employed for households who get the poverty assistance benefits is higher than for those does not. This result is consistent with the regression results. We could include that the poverty assistance benefits have a positive impact on the employment outcomes. 
+```{r}
+##instrumental variable regression
+rdiv_reg4 = ivreg(emp2020 ~ runvar + Drunvar | pab2019 | D, data = Poverty_workdata)
+summary(rdiv_reg4)
+```
+According to the results, we could see that the coefficient of pad2019 is 7.633e-06 with a t value to be 2.234 and a P-value of 0.0255(statistical significant!). This means an increase of 1$ will lead to an increase of 7.633e-06 in the probability of being employed. An additional $1000 of benefits will bring an increase of 0.76% in employment. According to the first stage regression results, we could see that, on average, people get $4000 of poverty assistance benefits. Since an additional $1000 of benefits will bring an increase of 0.76% in employment. $4000 poverty assistance benefits will yield an increase of 0.76% * 4 = 3.04%, which is pretty close to -3.115047e-02(the coefficient of D in the reduced form regressions).
+
+5. Frequencies plot: 
+```{r}
+##Calculate the counts of the number of observations within each bin of the running variable (Nobs). Using one observation per bin value
+plotdata=aggregate(Poverty_workdata$runvarbin, list(Poverty_workdata$runvarbin), FUN=length) %>% 
+  left_join(Poverty_workdata, by = c("Group.1" = "runvarbin")) %>% 
+  group_by(Group.1) %>% 
+  sample_n(size = 1)
+##create cubic polynomial of the binned running variable
+plotdata$runvar_2 = plotdata$runvar^2
+plotdata$runvar_3 = plotdata$runvar^3
+
+##estimate the following regression
+reg_bin <- lm(x ~ runvar + runvar_2 + runvar_3 + D + I(D * runvar) +I(D * runvar_2) + I(D * runvar_3) , data = plotdata)
+summary(reg_bin) 
+```
+With the t value being -0.989 and a P-value of  0.3252(yields different value each time), the indicator variable D is not significant. This means, on average, the difference between the number of households who get and do not get the poverty assistance benefits is not significant. 
+
+```{r}
+##predict the value of x
+plotdata$x_predicted = predict(reg_bin,newdata =plotdata)
+
+##Plot Nobs and the fitted values from this regression
+plot(plotdata$Group.1,plotdata$x,type="b",col="red",xlab="Dist to Threshold",ylab="Counts",main="Frequency Plot",) 
+points(plotdata$Group.1,plotdata$x_predicted,type="b",col="blue")
+abline(v=0, col="black")
+grid(nx = NA,ny = NULL,lty = 2, col = "gray", lwd = 2)
+```
+
+If households could manipulate the running variable to qualify for treatment, I would see that there would be a slight increase when approaching the 0 of "distance to threshold" from the negative side. This means if people know that they would receive the benefits below the threshold, they would deliberately earn a little bit less than the threshold. According to the graph, there is a bunch at the threshold and a slight increase at the left side of 0; another evidence is that, according to the regression, we could see that coefficient of runvar_3 is significant, which means there is a curve shape on the counts for the subjects who get the cash. This would be evidence that households can manipulate the running variable to qualify for treatment.
+
+6. Covariate index plot：
+```{r}
+##Regress employment in 2020 on a cubic polynomial in age, female, college, dummies for household size, and a cubic polynomial in 2019 household income
+reg_Covariate <- lm(emp2020 ~ age + age^2 + age^3 + female + college + nhhld + inc2019 + inc2019^2 + inc2019^3, data = Poverty_workdata)
+summary(reg_Covariate) 
+```
+```{r}
+##predict the value of emp2020
+Poverty_workdata$emp2020_predicted = predict(reg_Covariate,newdata = Poverty_workdata)
+##use these predicted values to estimate the same regression as in (4)
+olsmode6 = lm.cluster(emp2020_predicted ~ runvarbin + D + Drunvar, cluster='runvarbin',data = Poverty_workdata)
+summary(olsmode6)
+```
+According to the results in (4), we could see the coefficient of "runvarbin" is -1.785720e-06, the coefficient of "D" is -3.115047e-02, and the coefficient of "Drunvar" is -1.112249e-06. while with the predicted value of emp2020, we yield the coefficients of "runvarbin", "D" and "Drunvar" respectively to be -4.838383e-06, 8.780541e-04 and -6.924771e-08. The coefficients of the two regressions are very different. This implies that we miss an important variable when predicting the value of emp2020; in other words, independent variable of interest has a significant impact on the dependent variables of emp2020.
+
+```{r}
+plotdata=aggregate(Poverty_workdata$emp2020_predicted, list(Poverty_workdata$runvarbin), FUN=mean)
+plot(plotdata$Group.1,plotdata$x,type="b",col="red",xlab="Dist to Threshold",ylab="Employment in 2020",main="Reduced Form",) 
+abline(v=0, col="black")
+grid(nx = NA,ny = NULL,lty = 2, col = "gray", lwd = 2)
+```
+```{r}
+##instrumental variable regression
+rdiv_reg6 = ivreg(emp2020_predicted ~ runvar + Drunvar | pab2019 | D, data = Poverty_workdata)
+summary(rdiv_reg6)
+```
+By comparing the result of rdiv_reg6 and rdiv_reg4, we could also eyeball that there are huge difference between these two regressions. This is also an evidence that we miss an important variable when predicting the dependent variable. The identifying assumption of RD contains two parts:1)No Bunching.This means that subjects cannot choose to be on one side of the threshold or the other;2)No other discontinuous changes at the cutoff. This means that we need to assume unobservables do not change discontinuously around the threshold. In this case, we could see from the graph that without the influence of treatment, there will be no cutoff of employment in 2020. This proves that no other discontinuous changes at the cutoff.
+
+
+7. Sensitivity analysis: polynomial specification;
+```{r}
+##create cubic polynomial of the binned running variable
+Poverty_workdata$runvar_2 = Poverty_workdata$runvar^2
+Poverty_workdata$runvar_3 = Poverty_workdata$runvar^3
+
+poly1_reg = lm(emp2020 ~ D + runvar + I(D * runvar) , data = Poverty_workdata)
+Poverty_workdata$pred_poly1 = predict(poly1_reg, newdata = Poverty_workdata)
+poly2_reg = lm(emp2020 ~ D + runvar + runvar_2 + I(D * runvar) + I(D * runvar_2), data = Poverty_workdata)
+Poverty_workdata$pred_poly2 = predict(poly2_reg, newdata = Poverty_workdata)
+poly3_reg = lm(emp2020 ~ D + runvar + runvar_2 + runvar_3 + I(D * runvar) + I(D * runvar_2) + I(D * runvar_3),  data = Poverty_workdata)
+Poverty_workdata$pred_poly3 = predict(poly3_reg, newdata = Poverty_workdata)
+
+stargazer(poly1_reg,poly2_reg,poly3_reg, type="text", title = "Sensitivity Analysis: Polynomial Order")
+```
+```{r}
+plotdata=aggregate(cbind(Poverty_workdata$pred_poly1,Poverty_workdata$pred_poly2, Poverty_workdata$pred_poly3), list(Poverty_workdata$runvarbin), FUN=mean)
+plot(plotdata$Group.1,plotdata$V1,type="b",col="red",xlab="Dist to Threshold",ylab="Employment in 2020",main="Sensitivity Analysis: Polynomial Order", ylim = c(0.42, 0.5))
+lines(plotdata$Group.1,plotdata$V2,type="b",col="blue")
+lines(plotdata$Group.1,plotdata$V3,type="b",col="green")
+abline(v=0, col="black")
+grid(nx = NA,ny = NULL,lty = 2, col = "gray", lwd = 2)
+legend(-3,101,legend=c("Linear", "Quadratic", "Cubic"),col=c("red", "blue", "green"), lty=1:2, cex=0.8)
+```
+
+According to the results, we could see that the coefficient of D in the linear polynomial specification of the running variable is -0.031, and is statistically significant with the confidence level of 95%, the coefficient of D in the quadratic specification is -0.012, and in the cubic specification is 0.012. Both the coefficients of D in these two regressions are not statistically significant. These changes are also shown in the graph. These changes imply that the effect of the treatment is not stable since the discontinuity is sensitive to the specification.
+
+8. Sensitivity analysis: bandwidth:
+```{r}
+CoefMatrix1	= matrix(NA, 49, 5)# Matrix to store our results
+bwidths = seq(from=400, to=10000, by=200)
+for(ii in 1:length(bwidths)) {
+  bw_reg = lm.cluster(emp2020 ~ runvar + D + I(D * runvar) , cluster='runvarbin', data = Poverty[abs(Poverty$runvar) < bwidths[ii],])
+  CoefMatrix1[ii,1]= bwidths[ii]
+  CoefMatrix1[ii,2]= coefficients(bw_reg)[3]
+  CoefMatrix1[ii,3]= summary(bw_reg)[ , "Std. Error"][3]
+  CoefMatrix1[ii,4]= coefficients(bw_reg)[3] - 1.96*CoefMatrix1[ii,3]
+  CoefMatrix1[ii,5]= coefficients(bw_reg)[3] + 1.96*CoefMatrix1[ii,3]
+}
+```
+```{r}
+plot(CoefMatrix1[,1],CoefMatrix1[,2],type="b",col="blue",xlab="Bandwidth",ylab="Estimate",main="Sensitivity Analysis: Bandwidth",ylim=c(-0.1,0.2))
+lines(CoefMatrix1[,1],CoefMatrix1[,4],type="l",col="red")
+lines(CoefMatrix1[,1],CoefMatrix1[,5],type="l",col="red")
+abline(h=0, col="black")
+grid(nx = NULL, ny = NA, lty = 2, col = "gray", lwd = 2)
+```  
+
+As we can see in the graph, as the bandwidth increases, the result converges to a value(the line flattens out and the interval shrinks in the graph) and looks stable when bandwidth goes beyond 6000. According to the graph, the confidence interval does not cover the value of 0 when the bandwidth is beyond 5000. So 5000 is the minimum bandwidth for which the estimate is statistically significant(different from 0).
+
+9. Sensitivity analysis: permutation test:
+```{r}
+reps = 500
+CoefMatrix	= matrix(NA, reps, 1)	# Matrix to store our results.  
+for(ii in 1:reps) {
+  Poverty$pcutoff = sample(1:4, dim(Poverty)[1], replace = TRUE)
+  Poverty$fpl_per[Poverty$pcutoff == 1] <- 12490
+  Poverty$fpl_per[Poverty$pcutoff == 2] <- 16910
+  Poverty$fpl_per[Poverty$pcutoff == 3] <- 21330
+  Poverty$fpl_per[Poverty$pcutoff >= 4] <- 25750
+  Poverty$runvar_per = Poverty$inc2019 - Poverty$fpl_per
+  Poverty$runvarbin_per = round(Poverty$runvar_per/100)* 100
+  Poverty$D_per = ifelse(Poverty$runvar_per > 0, 1, 0)
+  
+  ptest_reg = lm(emp2020 ~ runvar_per + D_per + I(D_per * runvar_per) , data = Poverty[abs(Poverty$runvar_per)<5000,])
+  CoefMatrix[ii,1]=coefficients(ptest_reg)[3]
+}
+```
+
+```{r}
+hist(CoefMatrix[,1],breaks=20,xlim=c(-0.1,0.1),main="Permutation Test",xlab="Permutation Estimate")
+abline(v=-3.114847e-02, col="red")##mark the original value of the coefficient of D
+```
+
+According to the histogram, we could see that the frequency of the coefficient of D is centralized at 0, however, the original value of D is -3.114847e-02. Through this we could see that the effect of treatment is not a random result. This permutation test addresses the colleague's concerns that the effect of the treatment is not a result of randomness. This proofs of the effectiveness of treatment from the other side.
